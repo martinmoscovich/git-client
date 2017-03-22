@@ -13,21 +13,69 @@ import com.mmoscovich.git.client.model.GitUser;
  *
  */
 public interface GitClient extends AutoCloseable {
-
+	
 	/**
-	 * Initializes the adapter, using the repo on the current working directory or above.
+	 * @return whether the client is closed
+	 */
+	boolean isClosed();
+	
+	/**
+	 * @return whether the client has loaded the repo (or created one)
+	 */
+	boolean repoLoaded();
+	
+	/**
+	 * Checks whether a Git Repository exists in the current directory (or any parent directory).
+	 * 
+	 * @return
+	 * @throws GitClientException if something fails
+	 */
+	boolean repoExists() throws GitClientException;
+	
+	/**
+	 * Creates a repo in the current directory if it does not exist.
+	 * 
+	 * @throws GitClientException if the repo already exists or something fails.
+	 */
+	void createRepo() throws GitClientException;
+	
+	/**
+	 * Creates a repo in the specified directory if it does not exist.
+	 * 
+	 * @param gitDir directory where to start the search for a Git repo.
+	 * @throws GitClientException if the repo already exists or something fails.
+	 */
+	void createRepo(File gitDir) throws GitClientException;
+	
+	/**
+	 * Loads the repo in the current working directory or above if it exists
+	 * 
 	 * @throws GitClientException if no repository is found in that directory
 	 */
-	void initClient() throws GitClientException;
-	
+	void loadRepo() throws GitClientException;
 	
 	/**
-	 * Initializes the adapter, using the repo on the specified directory or above.
-	 * @throws GitClientException if no repository is found in that directory
+	 * Loads the repo on the specified directory or above.
+	 *
 	 * @param gitDir directory where to start the search for a Git repo.
 	 * @throws GitClientException if no repository is found in that directory
 	 */
-	void initClient(File gitDir) throws GitClientException;
+	void loadRepo(File gitDir) throws GitClientException;
+
+//	/**
+//	 * Initializes the adapter, using the repo on the current working directory or above.
+//	 * @throws GitClientException if no repository is found in that directory
+//	 */
+//	void initClient() throws GitClientException;
+//	
+//	
+//	/**
+//	 * Initializes the adapter, using the repo on the specified directory or above.
+//	 * @throws GitClientException if no repository is found in that directory
+//	 * @param gitDir directory where to start the search for a Git repo.
+//	 * @throws GitClientException if no repository is found in that directory
+//	 */
+//	void initClient(File gitDir) throws GitClientException;
 	
 	
 	/**
@@ -67,6 +115,50 @@ public interface GitClient extends AutoCloseable {
 	String findBranch(final String branchName) throws GitClientException;
 	
 	/**
+	 * Checks if a branch with the provided name exists
+	 * 
+	 * @param branchName name of the branch to search for
+	 * @return <code>true</code> if the branch exists, <code>false</code> otherwise.
+	 * @throws GitClientException if there is a problem while searching
+	 */
+	boolean branchExists(final String branchName) throws GitClientException;
+	
+	/**
+	 * Looks for <strong>local</strong> tags that start with the provided prefix.
+	 * <br>Only the tag name is required, Git-specific parts are completed inside.
+	 * @param tagPrefix the prefix to search for
+	 * @return the tag names that match the query or an empty list is none is found
+	 * @throws GitClientException if there is a problem while searching
+	 */
+	List<String> findTags(String tagPrefix) throws GitClientException;
+	
+	/**
+	 * Looks for the first <strong>local</strong> tag that starts with the provided prefix.
+	 * <br>Only the tag name is required, Git-specific parts are completed inside.
+	 * @param tagPrefix the prefix to search for
+	 * @return the first tag name that matches the query or <code>null</code> is none is found.
+	 * @throws GitClientException if there is a problem while searching
+	 */
+	String findFirstTag(String tagPrefix) throws GitClientException;
+	
+	/**
+	 * Looks for a <strong>local</strong> tag with exactly the provided name
+	 * @param tagName the name to search for
+	 * @return the tag name if found or <code>null</code> otherwise.
+	 * @throws GitClientException if there is a problem while searching
+	 */
+	String findTag(final String tagName) throws GitClientException;
+	
+	/**
+	 * Checks if a tag with the provided name exists
+	 * 
+	 * @param tagName name of the tag to search for
+	 * @return <code>true</code> if the tag exists, <code>false</code> otherwise.
+	 * @throws GitClientException if there is a problem while searching
+	 */
+	boolean tagExists(final String tagName) throws GitClientException;
+	
+	/**
 	 * Checkout the specified branch (ie. switches the current branch to the one specified).
 	 * @param branchName branch to checkout 
 	 * @throws GitClientException if there is a problem while checking out the branch
@@ -81,6 +173,23 @@ public interface GitClient extends AutoCloseable {
 	 * @throws GitClientException if there is a problem while checking out the branch
 	 */
 	void createAndCheckout(final String newBranchName, final String fromBranchName) throws GitClientException;
+	
+	/**
+	 * Creates a new branch with the provided name and makes it the current one.
+	 * <br>The new branch will be based of HEAD.
+	 * <br>Equivalent to <code>checkout -b</code>.
+	 * @param newBranchName name of the branch to create
+	 * @throws GitClientException if there is a problem while checking out the branch
+	 */
+	void createAndCheckout(final String newBranchName) throws GitClientException;
+	
+	
+	/**
+	 * Adds files to commit list
+	 * 
+	 * @param filenames files to include
+	 */
+	void stageFiles(List<String> filenames);
 	
 	/**
 	 * Commits the staged changes on the current branch using the provided message 
@@ -135,6 +244,13 @@ public interface GitClient extends AutoCloseable {
 	 * @throws GitClientException if there is a problem while checking
 	 */
 	boolean hasUncommitedChanges(boolean allowUntracked) throws GitClientException;
+	
+	/**
+	 * Fetches from remote.
+	 * 
+	 * @throws GitClientException if there is a problem while pulling
+	 */
+	void fetch() throws GitClientException;
 	
 	/**
 	 * Pulls a remote branch
@@ -206,4 +322,33 @@ public interface GitClient extends AutoCloseable {
 	 * @throws GitClientException if there is a problem
 	 */
 	GitUser getConfiguredUser() throws GitClientException;
+
+	/**
+	 * Adds a remote repository with the given name (eg. origin) and url
+	 * 
+	 * @param remoteName the name of the remote repository
+	 * @param url the repository url
+	 * @throws GitClientException if the repository already exists or there is a problem
+	 */
+	void remoteRepoAdd(String remoteName, String url) throws GitClientException;;
+
+	/**
+	 * Updates the URL of an existing remote repository reference with that name (eg. origin).
+	 * 
+	 * @param remoteName the name of the remote repository
+	 * @param url the repository url
+	 * @throws GitClientException if the repository does not exist or there is a problem
+	 */
+	void remoteRepoUpdateUrl(String remoteName, String url);
+	
+	/**
+	 * @return the directory where git stores the metadata for this repository
+	 * (usually [repo]/.git
+	 */
+	File getGitDirectory();
+	
+	/**
+	 * @return the list of staged files (files that will be commited).
+	 */
+	List<String> getStagedFiles();
 }

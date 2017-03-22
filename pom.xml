@@ -3,7 +3,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.mmoscovich.git</groupId>
 	<artifactId>git-client</artifactId>
-	<version>1.0</version>
+	<version>1.7</version>
 	
 	<name>Git Client</name>
 	<description>Git Java Client. Wraps JGit and Command Line into simpler API</description>

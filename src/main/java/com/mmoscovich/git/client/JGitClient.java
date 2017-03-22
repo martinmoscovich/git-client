@@ -6,15 +6,19 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
-import lombok.extern.slf4j.Slf4j;
-
+import org.eclipse.jgit.api.CheckoutCommand;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.api.ListBranchCommand;
+import org.eclipse.jgit.api.ListTagCommand;
 import org.eclipse.jgit.api.ListBranchCommand.ListMode;
 import org.eclipse.jgit.api.MergeCommand;
 import org.eclipse.jgit.api.MergeCommand.FastForwardMode;
 import org.eclipse.jgit.api.MergeResult;
+import org.eclipse.jgit.api.PullCommand;
+import org.eclipse.jgit.api.RemoteAddCommand;
+import org.eclipse.jgit.api.RemoteSetUrlCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
 import org.eclipse.jgit.lib.ConfigConstants;
 import org.eclipse.jgit.lib.Constants;
@@ -24,26 +28,30 @@ import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.RepositoryBuilder;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevWalk;
+import org.eclipse.jgit.transport.URIish;
 import org.eclipse.jgit.treewalk.FileTreeIterator;
 import org.eclipse.jgit.util.StringUtils;
 
 import com.mmoscovich.git.client.model.GitCommit;
 import com.mmoscovich.git.client.model.GitUser;
 
+import lombok.extern.slf4j.Slf4j;
+
 @Slf4j
 public class JGitClient implements GitClient {
 	private Git git;
-
+	
 	@Override
-	public void initClient(File gitDir) throws GitClientException {
-		doInitAdapter(new RepositoryBuilder().readEnvironment().findGitDir(gitDir));
-	}
-	@Override
-	public void initClient() throws GitClientException {
-		doInitAdapter(new RepositoryBuilder().readEnvironment().findGitDir());
+	public void loadRepo() throws GitClientException {
+		doLoadRepo(new RepositoryBuilder().readEnvironment().findGitDir());
 	}
 	
-	private void doInitAdapter(RepositoryBuilder builder) throws GitClientException {
+	@Override
+	public void loadRepo(File gitDir) throws GitClientException {
+		doLoadRepo(new RepositoryBuilder().readEnvironment().findGitDir(gitDir));
+	}
+
+	private void doLoadRepo(RepositoryBuilder builder) throws GitClientException {
 		try {
 			File gitDir = builder.getGitDir();
 		
@@ -56,6 +64,32 @@ public class JGitClient implements GitClient {
 		} catch(Exception e) {
 			throw new GitClientException("Error while initializing", e);
 		}
+	}
+	
+	@Override
+	public List<String> findTags(String tagPrefix) throws GitClientException {
+		List<String> tags = new ArrayList<String>();
+        if(StringUtils.isEmptyOrNull(tagPrefix)) return tags;
+        log.debug("Searching for tags that start with " + tagPrefix);
+
+        try
+        {
+            ListTagCommand cmd = git.tagList();
+            
+            List<Ref> refs = cmd.call();
+
+            for (Ref ref : refs) {
+            	String simpleName = ref.getName().substring(ref.getName().indexOf(Constants.R_TAGS) + Constants.R_TAGS.length());
+            	if (simpleName.startsWith(tagPrefix)) {
+            		tags.add(simpleName);
+                }
+            }
+
+            return tags;
+        }
+        catch (GitAPIException e) {
+            throw new GitClientException("Error while searching tags", e);
+        }
 	}
 	
 	public List<String> doFindBranches(String branchPrefix, ListMode type) throws GitClientException {
@@ -125,6 +159,22 @@ public class JGitClient implements GitClient {
 	}
 	
 	@Override
+	public String findFirstTag(String tagPrefix) throws GitClientException {
+		List<String> tags = this.findTags(tagPrefix);
+		if(tags.isEmpty()) return null;
+		return tags.get(0);
+	}
+	
+	@Override
+	public String findTag(String tagName) throws GitClientException {
+		log.debug("Searching for tag " + tagName);
+        for(String tag : this.findTags(tagName)) {
+        	if(tag.equals(tagName)) return tag; 
+        }
+        return null;
+	}
+	
+	@Override
 	public Boolean remoteBranchExists(String branchName) throws GitClientException {
 		for(String branch : this.doFindBranches(branchName, ListMode.REMOTE)) {
         	if(branch.equals(branchName)) return true; 
@@ -143,9 +193,20 @@ public class JGitClient implements GitClient {
 	}
 
 	@Override
+	public void createAndCheckout(String newBranchName) throws GitClientException {
+		this.createAndCheckout(newBranchName, null);
+	}
+	
+	@Override
 	public void createAndCheckout(String newBranchName, String fromBranchName) throws GitClientException {
 		try {
-			this.git.checkout().setCreateBranch(true).setName(newBranchName).setStartPoint(Constants.R_HEADS + fromBranchName).call();
+			CheckoutCommand cmd = this.git.checkout().setCreateBranch(true).setName(newBranchName);
+			
+			// If from branch is specified, use it
+			if(fromBranchName != null) cmd = cmd.setStartPoint(Constants.R_HEADS + fromBranchName);
+			
+			cmd.call();
+				
 		} catch (GitAPIException e) {
 			throw new GitClientException("Error while checking out branch", e);
 		}
@@ -246,8 +307,15 @@ public class JGitClient implements GitClient {
 	@Override
 	public void pull(String branchName) throws GitClientException {
 		try {
-			this.checkout(branchName);
-			this.git.pull().call();
+			PullCommand cmd = this.git.pull();
+
+			boolean localExists = (this.findBranch(branchName) != null); 
+			if(localExists) {
+				this.checkout(branchName);
+			} else {
+				cmd = cmd.setRemoteBranchName(branchName);
+			}
+			cmd.call();
 		} catch (GitAPIException e) {
 			throw new GitClientException("Error while pulling", e);
 		}
@@ -475,6 +543,127 @@ public class JGitClient implements GitClient {
 	
 	@Override
 	public void close() throws Exception {
-		if(this.git != null) this.git.close();
+		if(!this.isClosed()) this.git.close();
+		this.git = null;
 	}
+	@Override
+	public boolean repoExists() throws GitClientException {
+		try {
+			File gitDir = new RepositoryBuilder().readEnvironment().findGitDir().getGitDir();
+			return (null != gitDir);
+			
+		} catch(Exception e) {
+			throw new GitClientException("Error while initializing", e);
+		}
+	}
+	@Override
+	public void createRepo() throws GitClientException {
+		if(this.repoExists()) throw new GitClientException("A Repository already exists in this directory");
+		
+		try {
+			this.git = Git.init().call();
+			
+		} catch (GitAPIException e) {
+            throw new GitClientException("Error while creating the repository", e);
+        }
+	}
+	@Override
+	public void createRepo(File gitDir) throws GitClientException {
+		if(this.repoExists()) throw new GitClientException("A Repository already exists in this directory");
+		
+		try {
+			this.git = Git.init().setDirectory(gitDir).call();
+			
+		} catch (GitAPIException e) {
+            throw new GitClientException("Error while creating the repository", e);
+        }
+		
+	}
+
+	@Override
+	public void stageFiles(List<String> filenames) {
+		try {
+			for(String file : filenames) {
+				this.git.add().addFilepattern(file).call();
+			}
+		} catch (GitAPIException e) {
+			throw new GitClientException("Error while adding files to commit list", e);
+		}
+	}
+
+	@Override
+	public void remoteRepoAdd(String remoteName, String url) throws GitClientException {
+		try {
+			RemoteAddCommand cmd = this.git.remoteAdd();
+			cmd.setName(remoteName);
+			cmd.setUri(new URIish(url));
+			cmd.call();
+		} catch(Exception e) {
+			throw new GitClientException("Error while adding remote '" + remoteName + "'", e);
+		}
+	}
+
+	@Override
+	public void remoteRepoUpdateUrl(String remoteName, String url) {
+		try {
+			RemoteSetUrlCommand cmd = this.git.remoteSetUrl();
+			cmd.setName(remoteName);
+			cmd.setUri(new URIish(url));
+			cmd.call();
+		} catch(Exception e) {
+			throw new GitClientException("Error while updating the URL for remote '" + remoteName, e);
+		}
+	}
+
+	@Override
+	public File getGitDirectory() {
+		return this.git.getRepository().getDirectory();
+	}
+
+	@Override
+	public List<String> getStagedFiles() {
+		try {
+			return this.git.diff()
+				.setShowNameAndStatusOnly(true)
+				.setCached(true)
+				.call()
+				.stream()
+				.map(entry -> entry.getNewPath())
+				.collect(Collectors.toList());
+			
+		} catch(Exception e) {
+			throw new GitClientException("Error while retrieving staged files", e);
+		}
+	}
+
+	@Override
+	public void fetch() throws GitClientException {
+		try {
+			this.git.fetch().call();
+		} catch (GitAPIException e) {
+			throw new GitClientException("Error while fetching from remote", e);
+		}
+	}
+
+	@Override
+	public boolean repoLoaded() {
+		return (this.git != null);
+	}
+
+	@Override
+	public boolean isClosed() {
+		// if the internal git client is null, it is closed
+		return (this.git == null);
+	}
+
+	@Override
+	public boolean branchExists(String branchName) throws GitClientException {
+		return (this.findBranch(branchName) != null);
+	}
+
+	@Override
+	public boolean tagExists(String tagName) throws GitClientException {
+		return (this.findTag(tagName) != null);
+	}
+
 }

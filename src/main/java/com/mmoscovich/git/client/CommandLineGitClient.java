@@ -7,9 +7,6 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 
-import lombok.extern.slf4j.Slf4j;
-
-import org.codehaus.plexus.util.Os;
 import org.codehaus.plexus.util.StringUtils;
 import org.codehaus.plexus.util.cli.CommandLineException;
 
@@ -18,18 +15,21 @@ import com.mmoscovich.git.client.cmd.CommandLineExecutor.CommandResult;
 import com.mmoscovich.git.client.model.GitCommit;
 import com.mmoscovich.git.client.model.GitUser;
 
+import lombok.extern.slf4j.Slf4j;
+
 @Slf4j
 public class CommandLineGitClient implements GitClient {
 
 	/** Command line for Git executable. */
     private CommandLineExecutor cmdExecutor;
-    private String gitExecutable;
+//    private String gitExecutable;
     
     public CommandLineGitClient(String gitExecutable) {
-    	if (StringUtils.isBlank(gitExecutable)) {
-            gitExecutable = "git" + (Os.isFamily(Os.FAMILY_WINDOWS) ? ".exe" : "");
-        }
-    	this.gitExecutable = gitExecutable;
+//    	if (StringUtils.isBlank(gitExecutable)) {
+//            gitExecutable = "git" + (Os.isFamily(Os.FAMILY_WINDOWS) ? ".exe" : "");
+//        }
+//    	this.gitExecutable = gitExecutable;
+    	this.cmdExecutor = new CommandLineExecutor(gitExecutable);
     }
     
     /**
@@ -77,22 +77,13 @@ public class CommandLineGitClient implements GitClient {
     }
     
 	@Override
-	public void initClient() {
-		if(cmdExecutor == null) cmdExecutor = new CommandLineExecutor(gitExecutable);
-	}
-	@Override
-	public void initClient(File gitDir) {
-		throw new UnsupportedOperationException("Command line git adapter may only be used in the current directory");
-	}
-
-	@Override
 	public void setConfig(String name, String value) throws GitClientException {
 		if (value == null || value.isEmpty()) {
             value = "\"\"";
         }
 
         // ignore error exit codes
-        executeGitCommandExitCode("config", name, value);
+        executeGitCommandExitCode("config", "--add", name, value);
 	}
 	
 	@Override
@@ -151,6 +142,41 @@ public class CommandLineGitClient implements GitClient {
 	}
 	
 	@Override
+	public List<String> findTags(String tagPrefix) throws GitClientException {
+		String tags = executeGitCommandReturn("for-each-ref", "--format=\"%(refname:short)\"", "refs/tags/" + tagPrefix + "*");
+
+        if(tags == null || tags.isEmpty()) return Collections.emptyList();
+
+        // on *nix systems return values from git for-each-ref are wrapped in
+        // quotes
+        // https://github.com/aleksandr-m/gitflow-maven-plugin/issues/3
+        tags = tags.replaceAll("\"", "").trim();
+        
+        return Arrays.asList(tags.split("\\r?\\n"));
+	}
+
+	@Override
+	public String findFirstTag(String tagPrefix) throws GitClientException {
+		String tags = executeGitCommandReturn("for-each-ref", "--count=1",
+                "--format=\"%(refname:short)\"", "refs/tags/" + tagPrefix
+                        + "*");
+
+        // on *nix systems return values from git for-each-ref are wrapped in
+        // quotes
+        // https://github.com/aleksandr-m/gitflow-maven-plugin/issues/3
+        if (tags != null && !tags.isEmpty()) {
+        	tags = tags.replaceAll("\"", "").trim();
+        }
+
+        return tags;
+	}
+
+	@Override
+	public String findTag(String tagName) throws GitClientException {
+		return executeGitCommandReturn("for-each-ref", "refs/tags/" + tagName);
+	}
+	
+	@Override
 	public Boolean remoteBranchExists(String branchName) throws GitClientException {
 		return StringUtils.isNotBlank(executeGitCommandReturn("for-each-ref", "refs/remotes/*/" + branchName));
 	}
@@ -159,10 +185,19 @@ public class CommandLineGitClient implements GitClient {
 	public void checkout(String branchName) throws GitClientException {
 		executeGitCommand("checkout", branchName);
 	}
+	
+	@Override
+	public void createAndCheckout(String newBranchName) throws GitClientException {
+		this.createAndCheckout(newBranchName, null);
+	}
 
 	@Override
 	public void createAndCheckout(String newBranchName, String fromBranchName) throws GitClientException {
-		executeGitCommand("checkout", "-b", newBranchName, fromBranchName);
+		List<String> args = Arrays.asList("checkout", "-b", newBranchName);
+		
+		if(fromBranchName != null) args.add(fromBranchName);
+		
+		executeGitCommand(args.toArray(new String[] {}));
 	}
 
 	@Override
@@ -286,4 +321,98 @@ public class CommandLineGitClient implements GitClient {
 
 	@Override
 	public void close() throws Exception {}
+
+	@Override
+	public boolean repoExists() throws GitClientException {
+		CommandResult result = executeGitCommandExitCode("status");
+		return (!result.getError().contains("fatal: Not a git repository"));
+	}
+
+	@Override
+	public void createRepo() throws GitClientException {
+		if(this.repoExists()) throw new GitClientException("A Repository already exists in this directory");
+		
+		executeGitCommand("init");
+	}
+
+	@Override
+	public void createRepo(File gitDir) throws GitClientException {
+		throw new UnsupportedOperationException("Command line git adapter may only be used in the current directory");
+	}
+
+	@Override
+	public void loadRepo() throws GitClientException {
+		// No need to load, so we just check the repo exists
+		if(!this.repoExists()) throw new GitClientException("Git Repository not found in this directory (or above)");
+	}
+
+	@Override
+	public void loadRepo(File gitDir) throws GitClientException {
+		throw new UnsupportedOperationException("Command line git adapter may only be used in the current directory");
+	}
+
+	@Override
+	public void stageFiles(List<String> filenames) {
+		filenames.add(0, "add");
+		executeGitCommand(filenames.toArray(new String[filenames.size()]));
+	}
+
+	@Override
+	public void remoteRepoAdd(String remoteName, String url) throws GitClientException {
+		executeGitCommand("remote", "add", remoteName, url);
+	}
+
+	@Override
+	public void remoteRepoUpdateUrl(String remoteName, String url) {
+		executeGitCommand("remote", "set-url", remoteName, url);
+		
+	}
+
+	@Override
+	public File getGitDirectory() {
+		return new File(executeGitCommandReturn("rev-parse", "--git-dir"));
+	}
+
+	@Override
+	public List<String> getStagedFiles() {
+		executeGitCommandReturn();
+
+		String files;
+		files = executeGitCommandReturn("diff", "--name-only", "--cached");
+
+        if(files == null || files.isEmpty()) return Collections.emptyList();
+
+        // on *nix systems return values from some git commands are wrapped in
+        // quotes
+        // https://github.com/aleksandr-m/gitflow-maven-plugin/issues/3
+        files = files.replaceAll("\"", "").trim();
+        
+        return Arrays.asList(files.split("\\r?\\n"));
+	}
+
+	@Override
+	public void fetch() throws GitClientException {
+		executeGitCommand("fetch");
+	}
+
+	@Override
+	public boolean repoLoaded() {
+		return true;
+	}
+
+	@Override
+	public boolean isClosed() {
+		// Command line Git Client is never closed
+		return false;
+	}
+	
+	@Override
+	public boolean branchExists(String branchName) throws GitClientException {
+		return (this.findBranch(branchName) != null);
+	}
+
+	@Override
+	public boolean tagExists(String tagName) throws GitClientException {
+		return (this.findTag(tagName) != null);
+	}
 }
