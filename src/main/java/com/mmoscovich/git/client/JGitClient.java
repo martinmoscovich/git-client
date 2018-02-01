@@ -221,15 +221,21 @@ public class JGitClient implements GitClient {
 		}
 
 	}
-
+	
 	@Override
 	public void merge(String branchToMerge, boolean rebase, boolean noff, boolean squash) throws GitClientException {
+		this.merge(branchToMerge, rebase, noff, squash, null);
+	}
+
+	@Override
+	public void merge(String branchToMerge, boolean rebase, boolean noff, boolean squash, String message) throws GitClientException {
 		try {
 			Ref branchToMergeRef = this.getLocalBranch(branchToMerge); 
 			if(branchToMergeRef == null) throw new GitClientException("The branch to merge (" + branchToMerge + ") doesnt exist");
 			
 			MergeCommand cmd = this.git.merge().include(branchToMergeRef);
 			if(noff) cmd.setFastForward(FastForwardMode.NO_FF);
+			if(message != null && !message.isEmpty()) cmd.setMessage(message);
 			
 			cmd.setSquash(squash);
 			

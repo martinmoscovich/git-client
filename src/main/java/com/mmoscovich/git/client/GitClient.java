@@ -200,7 +200,7 @@ public interface GitClient extends AutoCloseable {
 	
 	
 	/**
-	 * Merges the current branch with the one specified.
+	 * Merges the current branch with the one specified, using the default message in the commit.
 	 * @param branchName name of the branch to merge with the current one
 	 * @param rebase whether it should merge or rebase (not supported on Native Java client)
 	 * @param noff if <code>true</code> the merge wont do a FF even if possible (ie a merge commit is always created).
@@ -208,6 +208,17 @@ public interface GitClient extends AutoCloseable {
 	 * @throws GitClientException if the branch to merge does not exists, if the merge is not successful (conflicts) or if there is a problem while merging.
 	 */
 	void merge(final String branchName, boolean rebase, boolean noff, boolean squash) throws GitClientException;
+	
+	/**
+	 * Merges the current branch with the one specified.
+	 * @param branchName name of the branch to merge with the current one
+	 * @param rebase whether it should merge or rebase (not supported on Native Java client)
+	 * @param noff if <code>true</code> the merge wont do a FF even if possible (ie a merge commit is always created).
+	 * @param squash whether to squash the merge.
+	 * @param message the custom message used in the commit
+	 * @throws GitClientException if the branch to merge does not exists, if the merge is not successful (conflicts) or if there is a problem while merging.
+	 */
+	void merge(final String branchName, boolean rebase, boolean noff, boolean squash, String message) throws GitClientException;
 	
 	
 	/**

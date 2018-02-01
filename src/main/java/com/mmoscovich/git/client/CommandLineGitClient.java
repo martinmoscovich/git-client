@@ -206,7 +206,12 @@ public class CommandLineGitClient implements GitClient {
 	}
 
 	@Override
-	public void merge(String branchName, boolean rebase, boolean noff, boolean squash) throws GitClientException {
+	public void merge(String branchToMerge, boolean rebase, boolean noff, boolean squash) throws GitClientException {
+		this.merge(branchToMerge, rebase, noff, squash, null);
+	}
+
+	@Override
+	public void merge(String branchName, boolean rebase, boolean noff, boolean squash, String message) throws GitClientException {
 		if (rebase) {
             executeGitCommand("rebase", branchName);
         } else if (noff) {
@@ -214,6 +219,10 @@ public class CommandLineGitClient implements GitClient {
         	args.add("merge");
         	if(noff) args.add("--no-ff");
         	if(squash) args.add("--squash");
+        	if(message != null && !message.isEmpty()) {
+        		args.add("-m");
+        		args.add(message);
+        	}
         	args.add(branchName);
         	
             executeGitCommand(args.toArray(new String[] {}));
